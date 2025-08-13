@@ -2,9 +2,9 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { ENTITY_NAMES, handlePrismaError, PrismaService } from 'src/common';
-import { ChangeOrderStatusdto, OrderPaginationDto, CreateOrderDto } from './dto';
 import { NATS_SERVICE } from 'src/config';
-import { Product } from './interfaces';
+import { ChangeOrderStatusdto, CreateOrderDto, OrderPaginationDto } from './dto';
+import { OrderWithProducts, Product } from './interfaces';
 
 @Injectable()
 export class OrdersService {
@@ -19,9 +19,7 @@ export class OrdersService {
     try {
       // 1. Confirmar los ids de los productos (sin repetidos)
       const productIds = Array.from(new Set(createOrderDto.items.map((item) => item.productId)));
-      const products = await firstValueFrom<Product[]>(
-        this.client.send({ cmd: 'validate_product' }, productIds),
-      );
+      const products = await firstValueFrom<Product[]>(this.client.send({ cmd: 'validate_product' }, productIds));
 
       // 2. Crear un Map para acceso eficiente
       const productMap = new Map<number, Product>(products.map((p) => [p.id, p]));
@@ -141,9 +139,7 @@ export class OrdersService {
       }
 
       const productIds = order.OrderItem.map((orderItem) => orderItem.productId);
-      const products = await firstValueFrom<Product[]>(
-        this.client.send({ cmd: 'validate_product' }, productIds),
-      );
+      const products = await firstValueFrom<Product[]>(this.client.send({ cmd: 'validate_product' }, productIds));
 
       return {
         ...order,
@@ -177,5 +173,21 @@ export class OrdersService {
       if (error instanceof RpcException) throw error;
       handlePrismaError(error, `${this.constructor.name}::findOne`);
     }
+  }
+
+  async createPaymentSession(order: OrderWithProducts) {
+    const paymentSession = await firstValueFrom(
+      this.client.send('create.session', {
+        orderId: order.id,
+        currency: 'usd',
+        items: order.orderItem.map((item) => ({
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+        })),
+      }),
+    );
+
+    return paymentSession;
   }
 }
